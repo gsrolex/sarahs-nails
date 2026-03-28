@@ -1,0 +1,164 @@
+import { createContext, useContext, useState, useCallback } from 'react';
+
+const translations = {
+  es: {
+    app_name: 'Perla',
+    home_title: 'Clientes',
+    total_owed: 'Total pendiente',
+    add_customer: 'Agregar cliente',
+    no_customers: 'No hay clientes aún',
+    balance: 'Saldo',
+    settled: 'Al día',
+    charge: 'Cargo',
+    payment: 'Pago',
+    add_charge: 'Agregar cargo',
+    add_payment: 'Registrar pago',
+    note: 'Nota (opcional)',
+    date: 'Fecha',
+    save: 'Guardar',
+    cancel: 'Cancelar',
+    delete: 'Eliminar',
+    confirm_delete: '¿Segura que quieres eliminar?',
+    language: 'Idioma',
+    name: 'Nombre',
+    customer_name: 'Nombre del cliente',
+    search: 'Buscar...',
+    products: 'Productos',
+    services: 'Servicios',
+    catalog: 'Catálogo',
+    add_product: 'Agregar producto',
+    add_service: 'Agregar servicio',
+    product_name: 'Nombre del producto',
+    service_name: 'Nombre del servicio',
+    price: 'Precio',
+    custom_amount: 'Monto personalizado',
+    custom: 'Personalizado',
+    amount: 'Monto',
+    history: 'Historial',
+    no_transactions: 'Sin transacciones',
+    today: 'Hoy',
+    back: 'Volver',
+    edit: 'Editar',
+    category_service: 'Servicio',
+    category_product: 'Producto',
+    total: 'Total',
+    confirm: 'Confirmar',
+    quick_charge: 'Cargo rápido',
+    all: 'Todos',
+    owes: 'Debe',
+    no_results: 'Sin resultados',
+    settings: 'Ajustes',
+    phone: 'Teléfono',
+    phone_placeholder: 'Ej: +52 555 123 4567',
+    message_on_whatsapp: 'Enviar WhatsApp',
+    add_photo: 'Agregar foto',
+    currency: 'Moneda',
+    exchange_rate: 'Tipo de cambio',
+    nio_per_usd: 'C$ por $1 USD',
+    history_tab: 'Historial',
+    all_transactions: 'Todas las transacciones',
+    this_month: 'Este mes',
+    this_year: 'Este año',
+    charges_total: 'Total cargos',
+    payments_total: 'Total pagos',
+    net: 'Neto',
+    monthly: 'Mensual',
+    yearly: 'Anual',
+    earnings: 'Ingresos',
+    jan: 'Ene', feb: 'Feb', mar: 'Mar', apr: 'Abr', may: 'May', jun: 'Jun',
+    jul: 'Jul', aug: 'Ago', sep: 'Sep', oct: 'Oct', nov: 'Nov', dec: 'Dic',
+  },
+  en: {
+    app_name: 'Perla',
+    home_title: 'Customers',
+    total_owed: 'Total owed',
+    add_customer: 'Add customer',
+    no_customers: 'No customers yet',
+    balance: 'Balance',
+    settled: 'Settled',
+    charge: 'Charge',
+    payment: 'Payment',
+    add_charge: 'Add charge',
+    add_payment: 'Record payment',
+    note: 'Note (optional)',
+    date: 'Date',
+    save: 'Save',
+    cancel: 'Cancel',
+    delete: 'Delete',
+    confirm_delete: 'Are you sure you want to delete?',
+    language: 'Language',
+    name: 'Name',
+    customer_name: 'Customer name',
+    search: 'Search...',
+    products: 'Products',
+    services: 'Services',
+    catalog: 'Catalog',
+    add_product: 'Add product',
+    add_service: 'Add service',
+    product_name: 'Product name',
+    service_name: 'Service name',
+    price: 'Price',
+    custom_amount: 'Custom amount',
+    custom: 'Custom',
+    amount: 'Amount',
+    history: 'History',
+    no_transactions: 'No transactions',
+    today: 'Today',
+    back: 'Back',
+    edit: 'Edit',
+    category_service: 'Service',
+    category_product: 'Product',
+    total: 'Total',
+    confirm: 'Confirm',
+    quick_charge: 'Quick charge',
+    all: 'All',
+    owes: 'Owes',
+    no_results: 'No results',
+    settings: 'Settings',
+    phone: 'Phone',
+    phone_placeholder: 'e.g. +52 555 123 4567',
+    message_on_whatsapp: 'WhatsApp',
+    add_photo: 'Add photo',
+    currency: 'Currency',
+    exchange_rate: 'Exchange rate',
+    nio_per_usd: 'C$ per $1 USD',
+    history_tab: 'History',
+    all_transactions: 'All transactions',
+    this_month: 'This month',
+    this_year: 'This year',
+    charges_total: 'Total charges',
+    payments_total: 'Total payments',
+    net: 'Net',
+    monthly: 'Monthly',
+    yearly: 'Yearly',
+    earnings: 'Earnings',
+    jan: 'Jan', feb: 'Feb', mar: 'Mar', apr: 'Apr', may: 'May', jun: 'Jun',
+    jul: 'Jul', aug: 'Aug', sep: 'Sep', oct: 'Oct', nov: 'Nov', dec: 'Dec',
+  },
+};
+
+const I18nContext = createContext();
+
+export function I18nProvider({ children }) {
+  const [lang, setLang] = useState(() => localStorage.getItem('perla_lang') || 'es');
+
+  const toggleLang = useCallback(() => {
+    setLang((prev) => {
+      const next = prev === 'es' ? 'en' : 'es';
+      localStorage.setItem('perla_lang', next);
+      return next;
+    });
+  }, []);
+
+  const t = useCallback((key) => translations[lang]?.[key] || translations.es[key] || key, [lang]);
+
+  return (
+    <I18nContext.Provider value={{ lang, toggleLang, t }}>
+      {children}
+    </I18nContext.Provider>
+  );
+}
+
+export function useI18n() {
+  return useContext(I18nContext);
+}
