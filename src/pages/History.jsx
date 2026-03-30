@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import AdminNav from '../components/AdminNav';
 import { useI18n } from '../lib/i18n';
 import { useCurrency } from '../lib/currency';
 import { getAllTransactions } from '../lib/db';
@@ -179,64 +180,52 @@ export default function History() {
             </div>
           </div>
 
-          {/* Recent transactions */}
+          {/* Payments received */}
           <div className="section">
-            <h3>{t('all_transactions')}</h3>
-            {transactions.length === 0 ? (
-              <div className="empty">{t('no_transactions')}</div>
-            ) : (
-              <div className="transaction-list">
-                {transactions.slice(0, 50).map((txn) => (
-                  <div
-                    key={txn.id}
-                    className="transaction-item clickable"
-                    onClick={() => navigate(`/customer/${txn.customer_id}`)}
-                  >
-                    <div className="txn-left">
-                      <span className={`txn-type ${txn.type}`}>
-                        {txn.type === 'charge' ? '↑' : '↓'}
-                      </span>
-                      <div className="txn-info">
-                        <span className="txn-note">
-                          {txn.products?.name || txn.note || t(txn.type)}
-                        </span>
-                        <span className="txn-date">
-                          {txn.customers?.name} &middot; {txn.date}
-                        </span>
+            <h3>{t('payments_total')}</h3>
+            {(() => {
+              const payments = transactions.filter(tx => tx.type === 'payment');
+              return payments.length === 0 ? (
+                <div className="empty">{t('no_transactions')}</div>
+              ) : (
+                <div className="transaction-list">
+                  {payments.slice(0, 50).map((txn) => (
+                    <div
+                      key={txn.id}
+                      className="transaction-item clickable"
+                      onClick={() => navigate(`/admin/customer/${txn.customer_id}`)}
+                    >
+                      <div className="txn-left">
+                        <span className="txn-type payment">$</span>
+                        <div className="txn-info">
+                          <span className="txn-note">
+                            {txn.customers?.name || t('payment')}
+                          </span>
+                          <span className="txn-date">
+                            {txn.note ? `${txn.note} · ` : ''}{txn.date}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="txn-right">
+                        <div className="txn-amounts">
+                          <span className="txn-amount payment">
+                            +{fmt(txn.amount)}
+                          </span>
+                          <span className="txn-amount-alt">
+                            {fmtAlt(txn.amount)}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                    <div className="txn-right">
-                      <div className="txn-amounts">
-                        <span className={`txn-amount ${txn.type}`}>
-                          {txn.type === 'charge' ? '+' : '-'}{fmt(txn.amount)}
-                        </span>
-                        <span className="txn-amount-alt">
-                          {fmtAlt(txn.amount)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </>
       )}
 
-      <nav className="bottom-nav">
-        <button className="nav-btn" onClick={() => navigate('/')}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          <span>{t('home_title')}</span>
-        </button>
-        <button className="nav-btn" onClick={() => navigate('/catalog')}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-          <span>{t('catalog')}</span>
-        </button>
-        <button className="nav-btn active" onClick={() => navigate('/history')}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
-          <span>{t('history_tab')}</span>
-        </button>
-      </nav>
+      <AdminNav />
     </div>
   );
 }

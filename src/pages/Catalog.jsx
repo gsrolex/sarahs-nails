@@ -1,31 +1,39 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import AdminNav from '../components/AdminNav';
+import ImagePicker from '../components/ImagePicker';
 import { useI18n } from '../lib/i18n';
-import { getProducts, createProduct, updateProduct, deleteProduct, uploadImage } from '../lib/db';
+import { getProducts, createProduct, updateProduct, deleteProduct, uploadImage, getStories, createStory, deleteStory, toggleStoryPin } from '../lib/db';
 import { useCurrency } from '../lib/currency';
-import { ICONS } from '../lib/icons';
+const SUBCATEGORIES = ['Zapatos', 'Vestidos', 'Blusas', 'Pantalones', 'Faldas', 'Bolsas', 'Lentes', 'Sombreros', 'Perfumes', 'Accesorios', 'Ropa Interior', 'Otro'];
 
 export default function Catalog() {
   const { t } = useI18n();
   const { fmt } = useCurrency();
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
+  const [stories, setStories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const [form, setForm] = useState({ name: '', price: '', category: 'service', icon: '💅', image_url: null });
+  const [form, setForm] = useState({ name: '', price: '', category: 'service', subcategory: '', image_url: null, published: false });
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [catTab, setCatTab] = useState('product');
+  const [catFilter, setCatFilter] = useState(null);
+  const [catSearch, setCatSearch] = useState('');
   const [saving, setSaving] = useState(false);
+  const storyFileRef = useRef();
   const fileRef = useRef();
 
-  useEffect(() => { loadProducts(); }, []);
+  useEffect(() => { loadAll(); }, []);
 
-  async function loadProducts() {
+  async function loadAll() {
     try {
-      const data = await getProducts();
-      setProducts(data);
+      const [prods, st] = await Promise.all([getProducts(), getStories()]);
+      setProducts(prods);
+      setStories(st);
     } catch (err) {
       console.error(err);
     } finally {
@@ -33,9 +41,40 @@ export default function Catalog() {
     }
   }
 
+  async function loadProducts() {
+    const data = await getProducts();
+    setProducts(data);
+  }
+
+  async function handleStoryUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const url = await uploadImage(file, 'stories');
+      await createStory(url);
+      const st = await getStories();
+      setStories(st);
+    } catch (err) { console.error(err); }
+  }
+
+  async function handleDeleteStory(id) {
+    try {
+      await deleteStory(id);
+      const st = await getStories();
+      setStories(st);
+    } catch (err) { console.error(err); }
+  }
+
+  async function handleTogglePin(id, pinned) {
+    try {
+      await toggleStoryPin(id, !pinned);
+      const st = await getStories();
+      setStories(st);
+    } catch (err) { console.error(err); }
+  }
+
   function openAdd(category) {
-    const defaultIcon = category === 'service' ? '💅' : '👟';
-    setForm({ name: '', price: '', category, icon: defaultIcon, image_url: null });
+    setForm({ name: '', price: '', category, subcategory: '', image_url: null, published: false });
     setEditItem(null);
     setImageFile(null);
     setImagePreview(null);
@@ -43,7 +82,7 @@ export default function Catalog() {
   }
 
   function openEdit(item) {
-    setForm({ name: item.name, price: String(item.price), category: item.category, icon: item.icon || '', image_url: item.image_url });
+    setForm({ name: item.name, price: item.price ? String(item.price) : '', category: item.category, subcategory: item.subcategory || '', image_url: item.image_url, published: !!item.published });
     setEditItem(item);
     setImageFile(null);
     setImagePreview(item.image_url);
@@ -55,30 +94,21 @@ export default function Catalog() {
     if (!file) return;
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
-    setForm((f) => ({ ...f, icon: '' }));
-  }
-
-  function selectIcon(emoji) {
-    setForm((f) => ({ ...f, icon: emoji, image_url: null }));
-    setImageFile(null);
-    setImagePreview(null);
   }
 
   async function handleSave(e) {
     e.preventDefault();
-    if (!form.name.trim() || !form.price || Number(form.price) <= 0 || saving) return;
+    if (!form.name.trim() || saving) return;
     setSaving(true);
     try {
-      let image_url = form.image_url;
-      if (imageFile) {
-        image_url = await uploadImage(imageFile, 'products');
-      }
+      // imagePreview is the source of truth — it's either a URL (existing/uploaded) or null
       const payload = {
         name: form.name.trim(),
-        price: Number(form.price),
+        price: form.price ? Number(form.price) : null,
         category: form.category,
-        icon: imageFile ? null : form.icon,
-        image_url: imageFile ? image_url : (form.icon ? null : image_url),
+        subcategory: form.subcategory || null,
+        image_url: imagePreview || null,
+        published: form.published,
       };
       if (editItem) {
         await updateProduct(editItem.id, payload);
@@ -109,7 +139,14 @@ export default function Catalog() {
 
   const services = products.filter((p) => p.category === 'service');
   const productItems = products.filter((p) => p.category === 'product');
-  const iconSet = form.category === 'service' ? ICONS.services : ICONS.products;
+
+
+  // Filtered list
+  const subcategories = [...new Set(productItems.map(p => p.subcategory).filter(Boolean))].sort();
+  const displayList = catTab === 'service' ? services : productItems;
+  const filteredList = displayList
+    .filter(item => !catFilter || item.subcategory === catFilter)
+    .filter(item => !catSearch || item.name.toLowerCase().includes(catSearch.toLowerCase()));
 
   return (
     <div className="page">
@@ -118,117 +155,102 @@ export default function Catalog() {
         <div style={{ width: 40 }} />
       </header>
 
-      <div className="catalog-section services">
-        <div className="catalog-section-header">
-          <div className="catalog-section-icon">💅</div>
-          <h3>{t('services')}</h3>
-          <button className="btn-add-sm" onClick={() => openAdd('service')}>+</button>
-        </div>
-        {services.length === 0 ? (
-          <div className="empty-sm">{t('no_results')}</div>
-        ) : (
-          <div className="catalog-list">
-            {services.map((item) => (
-              <div key={item.id} className="catalog-item service">
-                <div className="catalog-item-info" onClick={() => openEdit(item)}>
-                  <div className="catalog-item-visual service">
-                    {item.image_url ? (
-                      <img src={item.image_url} alt="" className="catalog-item-img" />
-                    ) : (
-                      <span className="catalog-item-icon">{item.icon || '💅'}</span>
-                    )}
-                  </div>
-                  <span className="catalog-item-name">{item.name}</span>
-                  <span className="catalog-item-price">{fmt(item.price)}</span>
-                </div>
-                {confirmDelete === item.id ? (
-                  <div className="catalog-item-actions">
-                    <button className="btn-danger-sm" onClick={() => handleDelete(item.id)}>{t('confirm')}</button>
-                    <button className="btn-secondary-sm" onClick={() => setConfirmDelete(null)}>{t('cancel')}</button>
-                  </div>
-                ) : (
-                  <button className="btn-delete-sm" onClick={() => setConfirmDelete(item.id)}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+      {/* Add buttons */}
+      <div className="catalog-add-row">
+        <button className="catalog-add-btn" onClick={() => openAdd('product')}>
+          + {t('add_product')}
+        </button>
+        <button className="catalog-add-btn secondary" onClick={() => openAdd('service')}>
+          + {t('add_service')}
+        </button>
       </div>
 
-      <div className="catalog-section products">
-        <div className="catalog-section-header">
-          <div className="catalog-section-icon">🛍️</div>
-          <h3>{t('products')}</h3>
-          <button className="btn-add-sm" onClick={() => openAdd('product')}>+</button>
-        </div>
-        {productItems.length === 0 ? (
-          <div className="empty-sm">{t('no_results')}</div>
-        ) : (
-          <div className="catalog-list">
-            {productItems.map((item) => (
-              <div key={item.id} className="catalog-item product">
-                <div className="catalog-item-info" onClick={() => openEdit(item)}>
-                  <div className="catalog-item-visual product">
-                    {item.image_url ? (
-                      <img src={item.image_url} alt="" className="catalog-item-img" />
-                    ) : (
-                      <span className="catalog-item-icon">{item.icon || '👟'}</span>
-                    )}
-                  </div>
-                  <span className="catalog-item-name">{item.name}</span>
-                  <span className="catalog-item-price">{fmt(item.price)}</span>
-                </div>
-                {confirmDelete === item.id ? (
-                  <div className="catalog-item-actions">
-                    <button className="btn-danger-sm" onClick={() => handleDelete(item.id)}>{t('confirm')}</button>
-                    <button className="btn-secondary-sm" onClick={() => setConfirmDelete(null)}>{t('cancel')}</button>
-                  </div>
-                ) : (
-                  <button className="btn-delete-sm" onClick={() => setConfirmDelete(item.id)}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+      {/* Tabs */}
+      <div className="catalog-tabs">
+        <button className={`catalog-tab ${catTab === 'product' ? 'active' : ''}`} onClick={() => { setCatTab('product'); setCatFilter(null); }}>
+          {t('products')} ({productItems.length})
+        </button>
+        <button className={`catalog-tab ${catTab === 'service' ? 'active' : ''}`} onClick={() => { setCatTab('service'); setCatFilter(null); }}>
+          {t('services')} ({services.length})
+        </button>
       </div>
+
+      {/* Category filter chips (products only) */}
+      {catTab === 'product' && subcategories.length > 0 && (
+        <div className="catalog-filter-chips">
+          {subcategories.map((cat) => (
+            <button
+              key={cat}
+              className={`catalog-chip ${catFilter === cat ? 'active' : ''}`}
+              onClick={() => setCatFilter(catFilter === cat ? null : cat)}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Search */}
+      <div className="search-bar" style={{ marginBottom: 12 }}>
+        <input type="text" placeholder={t('search')} value={catSearch} onChange={(e) => setCatSearch(e.target.value)} />
+      </div>
+
+      {/* List */}
+      {filteredList.length === 0 ? (
+        <div className="empty-sm">{t('no_results')}</div>
+      ) : (
+        <div className="catalog-list">
+          {filteredList.map((item) => (
+            <div key={item.id} className={`catalog-item ${item.category}`}>
+              <div className="catalog-item-info" onClick={() => openEdit(item)}>
+                <div className={`catalog-item-visual ${item.category}`}>
+                  {item.image_url ? (
+                    <img src={item.image_url} alt="" className="catalog-item-img" />
+                  ) : (
+                    <span className="catalog-item-placeholder">+</span>
+                  )}
+                </div>
+                <div className="catalog-item-text">
+                  <span className="catalog-item-name">{item.name}</span>
+                  {item.subcategory && <span className="catalog-item-subcat">{item.subcategory}</span>}
+                </div>
+                {Number(item.price) > 0 && <span className="catalog-item-price">{fmt(item.price)}</span>}
+              </div>
+              <button
+                className={`publish-toggle ${item.published ? 'on' : ''}`}
+                onClick={(e) => { e.stopPropagation(); updateProduct(item.id, { published: !item.published }).then(loadProducts); }}
+              >
+                {item.published ? '👁' : '👁‍🗨'}
+              </button>
+              {confirmDelete === item.id ? (
+                <div className="catalog-item-actions">
+                  <button className="btn-danger-sm" onClick={() => handleDelete(item.id)}>{t('confirm')}</button>
+                  <button className="btn-secondary-sm" onClick={() => setConfirmDelete(null)}>{t('cancel')}</button>
+                </div>
+              ) : (
+                <button className="btn-delete-sm" onClick={() => setConfirmDelete(item.id)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {showAdd && (
-        <div className="modal-overlay" onClick={() => { setShowAdd(false); setEditItem(null); }}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay">
+          <div className="modal">
             <h2>{editItem ? t('edit') : (form.category === 'service' ? t('add_service') : t('add_product'))}</h2>
+            <ImagePicker
+              currentUrl={imagePreview}
+              folder="products"
+              onSelect={(url) => {
+                setImagePreview(url);
+                setImageFile(null);
+                setForm((f) => ({ ...f, image_url: url }));
+              }}
+            />
             <form onSubmit={handleSave}>
-              {/* Icon picker */}
-              <div className="icon-picker-section">
-                <div className="icon-picker-grid">
-                  {iconSet.map((ic) => (
-                    <button
-                      key={ic.emoji}
-                      type="button"
-                      className={`icon-picker-btn ${form.icon === ic.emoji && !imagePreview ? 'active' : ''}`}
-                      onClick={() => selectIcon(ic.emoji)}
-                    >
-                      {ic.emoji}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    className={`icon-picker-btn upload ${imagePreview ? 'active' : ''}`}
-                    onClick={() => fileRef.current?.click()}
-                  >
-                    {imagePreview ? (
-                      <img src={imagePreview} alt="" className="icon-picker-preview" />
-                    ) : (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                    )}
-                  </button>
-                </div>
-                <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFileChange} />
-              </div>
-
               <input
                 type="text"
                 placeholder={form.category === 'service' ? t('service_name') : t('product_name')}
@@ -240,10 +262,30 @@ export default function Catalog() {
                 type="number"
                 step="0.01"
                 min="0"
-                placeholder={t('price')}
+                placeholder={`${t('price')} (${t('custom')})`}
                 value={form.price}
                 onChange={(e) => setForm({ ...form, price: e.target.value })}
               />
+              {form.category === 'product' && (
+                <select
+                  className="subcategory-select"
+                  value={form.subcategory}
+                  onChange={(e) => setForm({ ...form, subcategory: e.target.value })}
+                >
+                  <option value="">— Categoría —</option>
+                  {SUBCATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              )}
+              <button
+                type="button"
+                className={`publish-toggle-row ${form.published ? 'on' : ''}`}
+                onClick={() => setForm({ ...form, published: !form.published })}
+              >
+                <span className="publish-toggle-eye">{form.published ? '👁' : '👁‍🗨'}</span>
+                <span>{form.published ? 'Visible en tienda' : 'Oculto en tienda'}</span>
+              </button>
               <div className="modal-actions">
                 <button type="button" className="btn-secondary" onClick={() => { setShowAdd(false); setEditItem(null); }}>
                   {t('cancel')}
@@ -257,20 +299,9 @@ export default function Catalog() {
         </div>
       )}
 
-      <nav className="bottom-nav">
-        <button className="nav-btn" onClick={() => navigate('/')}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          <span>{t('home_title')}</span>
-        </button>
-        <button className="nav-btn active" onClick={() => navigate('/catalog')}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-          <span>{t('catalog')}</span>
-        </button>
-        <button className="nav-btn" onClick={() => navigate('/history')}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
-          <span>{t('history_tab')}</span>
-        </button>
-      </nav>
+
+
+      <AdminNav />
     </div>
   );
 }

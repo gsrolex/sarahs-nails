@@ -2,10 +2,10 @@
   "name": "Sarah's Nails - Control de Crédito",
   "short_name": "Sarah's Nails",
   "description": "Control de crédito para tu negocio",
-  "start_url": "/",
+  "start_url": "/admin",
   "display": "standalone",
-  "background_color": "#0a0a0f",
-  "theme_color": "#0a0a0f",
+  "background_color": "#e8d0d8",
+  "theme_color": "#e8d0d8",
   "orientation": "portrait",
   "icons": [
     {

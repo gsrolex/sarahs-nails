@@ -5,7 +5,7 @@ const DEFAULT_RATE = 36.8; // NIO per USD
 const CurrencyContext = createContext();
 
 export function CurrencyProvider({ children }) {
-  const [currency, setCurrency] = useState(() => localStorage.getItem('perla_currency') || 'USD');
+  const [currency, setCurrency] = useState(() => localStorage.getItem('perla_currency') || 'NIO');
   const [rate, setRate] = useState(() => {
     const saved = localStorage.getItem('perla_rate');
     return saved ? Number(saved) : DEFAULT_RATE;
@@ -24,22 +24,26 @@ export function CurrencyProvider({ children }) {
     localStorage.setItem('perla_rate', String(newRate));
   }, []);
 
-  // Format a USD amount in the current currency
-  const fmt = useCallback((usdAmount) => {
-    const num = Number(usdAmount);
-    if (currency === 'USD') {
-      return `$${num.toFixed(2)}`;
+  // Format number with thousand separators
+  function fmtNum(n) {
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // Amounts are stored as-entered (typically Córdobas).
+  const fmt = useCallback((amount) => {
+    const num = Number(amount);
+    if (currency === 'NIO') {
+      return `C$${fmtNum(num)}`;
     }
-    return `C$${(num * rate).toFixed(2)}`;
+    return `$${fmtNum(num / rate)}`;
   }, [currency, rate]);
 
-  // Show the secondary currency as a hint
-  const fmtAlt = useCallback((usdAmount) => {
-    const num = Number(usdAmount);
-    if (currency === 'USD') {
-      return `C$${(num * rate).toFixed(0)}`;
+  const fmtAlt = useCallback((amount) => {
+    const num = Number(amount);
+    if (currency === 'NIO') {
+      return `$${fmtNum(num / rate)}`;
     }
-    return `$${num.toFixed(2)}`;
+    return `C$${fmtNum(num)}`;
   }, [currency, rate]);
 
   const value = useMemo(() => ({
