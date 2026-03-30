@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AdminNav from '../components/AdminNav';
+import AdminHeader from '../components/AdminHeader';
 import ImagePicker from '../components/ImagePicker';
 import { useI18n } from '../lib/i18n';
-import { getProducts, createProduct, updateProduct, deleteProduct, uploadImage, getStories, createStory, deleteStory, toggleStoryPin } from '../lib/db';
+import { getProducts, createProduct, updateProduct, deleteProduct, uploadImage, addProductImage, removeProductImage } from '../lib/db';
 import { useCurrency } from '../lib/currency';
 const SUBCATEGORIES = ['Zapatos', 'Vestidos', 'Blusas', 'Pantalones', 'Faldas', 'Bolsas', 'Lentes', 'Sombreros', 'Perfumes', 'Accesorios', 'Ropa Interior', 'Otro'];
 
@@ -12,7 +13,6 @@ export default function Catalog() {
   const { fmt } = useCurrency();
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
-  const [stories, setStories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -20,72 +20,39 @@ export default function Catalog() {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [serviceImages, setServiceImages] = useState([]);
+  const [showServiceImagePicker, setShowServiceImagePicker] = useState(false);
   const [catTab, setCatTab] = useState('product');
   const [catFilter, setCatFilter] = useState(null);
   const [catSearch, setCatSearch] = useState('');
   const [saving, setSaving] = useState(false);
-  const storyFileRef = useRef();
   const fileRef = useRef();
 
-  useEffect(() => { loadAll(); }, []);
-
-  async function loadAll() {
-    try {
-      const [prods, st] = await Promise.all([getProducts(), getStories()]);
-      setProducts(prods);
-      setStories(st);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => { loadProducts(); }, []);
 
   async function loadProducts() {
-    const data = await getProducts();
-    setProducts(data);
-  }
-
-  async function handleStoryUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
     try {
-      const url = await uploadImage(file, 'stories');
-      await createStory(url);
-      const st = await getStories();
-      setStories(st);
+      const data = await getProducts();
+      setProducts(data);
     } catch (err) { console.error(err); }
-  }
-
-  async function handleDeleteStory(id) {
-    try {
-      await deleteStory(id);
-      const st = await getStories();
-      setStories(st);
-    } catch (err) { console.error(err); }
-  }
-
-  async function handleTogglePin(id, pinned) {
-    try {
-      await toggleStoryPin(id, !pinned);
-      const st = await getStories();
-      setStories(st);
-    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
   }
 
   function openAdd(category) {
-    setForm({ name: '', price: '', category, subcategory: '', image_url: null, published: false });
+    setForm({ name: '', price: '', category, subcategory: '', description: '', image_url: null, published: false });
     setEditItem(null);
     setImageFile(null);
     setImagePreview(null);
+    setServiceImages([]);
     setShowAdd(true);
   }
 
   function openEdit(item) {
-    setForm({ name: item.name, price: item.price ? String(item.price) : '', category: item.category, subcategory: item.subcategory || '', image_url: item.image_url, published: !!item.published });
+    setForm({ name: item.name, price: item.price ? String(item.price) : '', category: item.category, subcategory: item.subcategory || '', description: item.description || '', image_url: item.image_url, published: !!item.published });
     setEditItem(item);
     setImageFile(null);
     setImagePreview(item.image_url);
+    setServiceImages(item.product_images || []);
     setShowAdd(true);
   }
 
@@ -107,6 +74,7 @@ export default function Catalog() {
         price: form.price ? Number(form.price) : null,
         category: form.category,
         subcategory: form.subcategory || null,
+        description: form.category === 'service' ? (form.description || null) : null,
         image_url: imagePreview || null,
         published: form.published,
       };
@@ -150,10 +118,7 @@ export default function Catalog() {
 
   return (
     <div className="page">
-      <header className="header">
-        <h1>{t('catalog')}</h1>
-        <div style={{ width: 40 }} />
-      </header>
+      <AdminHeader title={t('catalog')} />
 
       {/* Add buttons */}
       <div className="catalog-add-row">
@@ -266,6 +231,54 @@ export default function Catalog() {
                 value={form.price}
                 onChange={(e) => setForm({ ...form, price: e.target.value })}
               />
+              {form.category === 'service' && (
+                <>
+                  <textarea
+                    className="service-description-input"
+                    placeholder="Descripción del servicio (opcional)"
+                    value={form.description || ''}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    rows={3}
+                  />
+                  {/* Multiple service images */}
+                  {editItem && (
+                    <div className="service-images-section">
+                      <div className="service-images-header">
+                        <span className="service-images-label">Fotos del servicio</span>
+                        <button type="button" className="btn-add-sm" onClick={() => setShowServiceImagePicker(true)}>+</button>
+                      </div>
+                      {serviceImages.length > 0 && (
+                        <div className="service-images-grid">
+                          {serviceImages.map((img) => (
+                            <div key={img.id} className="service-image-thumb">
+                              <img src={img.image_url} alt="" />
+                              <button type="button" className="service-image-remove" onClick={async () => {
+                                await removeProductImage(img.id);
+                                setServiceImages(prev => prev.filter(i => i.id !== img.id));
+                              }}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {showServiceImagePicker && (
+                    <ImagePicker
+                      currentUrl={null}
+                      folder="products"
+                      multiple
+                      inline
+                      onSelect={async (url) => {
+                        if (editItem) {
+                          const img = await addProductImage(editItem.id, url);
+                          setServiceImages(prev => [...prev, img]);
+                        }
+                      }}
+                      onClose={() => setShowServiceImagePicker(false)}
+                    />
+                  )}
+                </>
+              )}
               {form.category === 'product' && (
                 <select
                   className="subcategory-select"

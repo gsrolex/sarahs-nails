@@ -76,7 +76,7 @@ export async function deleteCustomer(id) {
 export async function getProducts() {
   const { data, error } = await supabase
     .from('products')
-    .select('*')
+    .select('*, product_images(*)')
     .order('category')
     .order('name');
   if (error) throw error;
@@ -140,10 +140,24 @@ export async function deleteTransaction(id) {
 export async function getPublishedProducts() {
   const { data, error } = await supabase
     .from('products')
-    .select('*')
+    .select('*, product_images(*)')
     .eq('published', true)
     .order('category')
     .order('name');
+  if (error) throw error;
+  return data;
+}
+
+export async function getRecentlySoldProducts() {
+  // Get products unpublished in the last 14 days (sold items)
+  const { data, error } = await supabase
+    .from('products')
+    .select('*, product_images(*)')
+    .eq('published', false)
+    .eq('category', 'product')
+    .not('image_url', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(10);
   if (error) throw error;
   return data;
 }
@@ -178,6 +192,32 @@ export async function deleteStory(id) {
 
 export async function toggleStoryPin(id, pinned) {
   const { error } = await supabase.from('stories').update({ pinned }).eq('id', id);
+  if (error) throw error;
+}
+
+// --- Product Images (multiple per product) ---
+export async function getProductImages(productId) {
+  const { data, error } = await supabase
+    .from('product_images')
+    .select('*')
+    .eq('product_id', productId)
+    .order('sort_order');
+  if (error) throw error;
+  return data;
+}
+
+export async function addProductImage(productId, imageUrl) {
+  const { data, error } = await supabase
+    .from('product_images')
+    .insert({ product_id: productId, image_url: imageUrl })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function removeProductImage(id) {
+  const { error } = await supabase.from('product_images').delete().eq('id', id);
   if (error) throw error;
 }
 

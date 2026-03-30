@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useI18n } from '../lib/i18n';
 import AdminNav from '../components/AdminNav';
+import AdminHeader from '../components/AdminHeader';
 import ImagePicker from '../components/ImagePicker';
 import { getStories, createStory, deleteStory, toggleStoryPin, getGallery, createGalleryItem, deleteGalleryItem, reorderGallery, uploadImage } from '../lib/db';
 import { supabase } from '../lib/supabase';
@@ -14,6 +15,7 @@ export default function Stories() {
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [confirmDeleteGallery, setConfirmDeleteGallery] = useState(null);
+  const [uploading, setUploading] = useState(false);
   const [mediaTab, setMediaTab] = useState('stories');
   const [showStoryPicker, setShowStoryPicker] = useState(false);
   const [showGalleryPicker, setShowGalleryPicker] = useState(false);
@@ -32,6 +34,7 @@ export default function Stories() {
   }
 
   async function handleStorySelect(url) {
+    setUploading(true);
     try {
       await createStory(url);
       setShowStoryPicker(false);
@@ -42,14 +45,17 @@ export default function Stories() {
         });
       } catch (e) { console.error('Push failed:', e); }
     } catch (err) { console.error(err); }
+    finally { setUploading(false); }
   }
 
   async function handleGallerySelect(url) {
+    setUploading(true);
     try {
       await createGalleryItem(url);
       setShowGalleryPicker(false);
       await loadAll();
     } catch (err) { console.error(err); }
+    finally { setUploading(false); }
   }
 
   async function handleDeleteStory(id) {
@@ -77,10 +83,14 @@ export default function Stories() {
 
   return (
     <div className="page">
-      <header className="header">
-        <h1>Media</h1>
-        <div style={{ width: 40 }} />
-      </header>
+      <AdminHeader title="Media" />
+
+      {uploading && (
+        <div className="upload-indicator">
+          <div className="loading" />
+          <span>Subiendo...</span>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="catalog-tabs" style={{ marginBottom: 16 }}>

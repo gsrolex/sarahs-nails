@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AdminNav from '../components/AdminNav';
+import AdminHeader from '../components/AdminHeader';
 import { useI18n } from '../lib/i18n';
 import { useCurrency } from '../lib/currency';
 import { getAllTransactions } from '../lib/db';
@@ -79,12 +80,11 @@ export default function History() {
 
   return (
     <div className="page">
-      <header className="header">
-        <h1>{t('history_tab')}</h1>
+      <AdminHeader title={t('history_tab')} extra={
         <button className="currency-toggle" onClick={toggleCurrency}>
           {currency === 'USD' ? 'C$' : '$'}
         </button>
-      </header>
+      } />
 
       {/* Currency bar */}
       <div className="currency-bar">

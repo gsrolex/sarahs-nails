@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { getPublishedProducts, getStories, getGallery, savePushSubscription } from '../lib/db';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { getPublishedProducts, getRecentlySoldProducts, getStories, getGallery, savePushSubscription } from '../lib/db';
 import './Shop.css';
 
 const WHATSAPP_NUMBER = '50558213009';
@@ -14,20 +14,30 @@ function urlBase64ToUint8Array(base64String) {
 
 export default function Shop() {
   const [products, setProducts] = useState([]);
+  const [soldProducts, setSoldProducts] = useState([]);
   const [stories, setStories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeStory, setActiveStory] = useState(null);
   const [storyProgress, setStoryProgress] = useState(0);
-  const [tab, setTab] = useState('products');
+  const [tab, setTab] = useState('services');
   const [activeFilter, setActiveFilter] = useState(null);
+  const [shopSearch, setShopSearch] = useState('');
+  const [expandedService, setExpandedService] = useState(null);
+  const [carouselIndex, setCarouselIndex] = useState({});
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [zoomImages, setZoomImages] = useState(null);
+  const [zoomIndex, setZoomIndex] = useState(0);
+  const swipeStartX = useRef(0);
+  const swipeStartY = useRef(0);
   const [gallery, setGallery] = useState([]);
   const [notifAsked, setNotifAsked] = useState(false);
 
   useEffect(() => {
     async function load() {
       try {
-        const [prods, st, gal] = await Promise.all([getPublishedProducts(), getStories(), getGallery()]);
+        const [prods, sold, st, gal] = await Promise.all([getPublishedProducts(), getRecentlySoldProducts(), getStories(), getGallery()]);
         setProducts(prods);
+        setSoldProducts(sold);
         setStories(st);
         setGallery(gal);
       } catch (err) { console.error(err); }
@@ -38,7 +48,7 @@ export default function Shop() {
 
   // Ask for notification permission after first interaction
   async function askNotificationPermission() {
-    if (notifAsked || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (notifAsked || typeof Notification === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
     if (Notification.permission === 'granted') {
       await subscribeToPush();
       return;
@@ -67,12 +77,15 @@ export default function Shop() {
 
   // Auto-ask on first visit (after a short delay)
   useEffect(() => {
-    if (Notification.permission === 'granted') {
-      subscribeToPush();
-    } else if (Notification.permission === 'default') {
-      const timer = setTimeout(() => askNotificationPermission(), 5000);
-      return () => clearTimeout(timer);
-    }
+    if (typeof Notification === 'undefined') return;
+    try {
+      if (Notification.permission === 'granted') {
+        subscribeToPush();
+      } else if (Notification.permission === 'default') {
+        const timer = setTimeout(() => askNotificationPermission(), 5000);
+        return () => clearTimeout(timer);
+      }
+    } catch (e) { console.error('Notification check failed:', e); }
   }, []);
 
   // Story viewer
@@ -107,6 +120,21 @@ export default function Shop() {
     }
   }
 
+  async function shareProduct(product) {
+    const price = Number(product.price);
+    const priceText = price > 0 ? ` - C$${price.toFixed(2)}` : '';
+    const text = `${product.name}${priceText}\n\nMíralo en Sarah's Nails:`;
+    const url = 'https://sarahsnailsni.com';
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: product.name, text, url });
+      } catch (e) { /* user cancelled */ }
+    } else {
+      navigator.clipboard?.writeText(`${text} ${url}`);
+    }
+  }
+
   function orderOnWhatsApp(product) {
     const price = Number(product.price);
     const priceText = price > 0 ? ` - C$${price.toFixed(2)}` : '';
@@ -123,11 +151,13 @@ export default function Shop() {
     return [...cats].sort();
   }, [productItems]);
 
-  const displayItems = tab === 'services'
-    ? services
-    : activeFilter
-      ? productItems.filter(p => p.subcategory === activeFilter)
-      : productItems;
+  const filteredProducts = productItems
+    .filter(p => !activeFilter || p.subcategory === activeFilter)
+    .filter(p => !shopSearch || p.name.toLowerCase().includes(shopSearch.toLowerCase()));
+
+  const filteredSold = soldProducts
+    .filter(p => !activeFilter || p.subcategory === activeFilter)
+    .filter(p => !shopSearch || p.name.toLowerCase().includes(shopSearch.toLowerCase()));
 
   const visibleStories = stories.slice(0, 6);
 
@@ -185,20 +215,32 @@ export default function Shop() {
       {/* Tabs */}
       <div className="shop-tabs">
         <button
-          className={`shop-tab ${tab === 'products' ? 'active' : ''}`}
-          onClick={() => { setTab('products'); setActiveFilter(null); }}
-        >
-          Productos
-        </button>
-        <button
           className={`shop-tab ${tab === 'services' ? 'active' : ''}`}
           onClick={() => setTab('services')}
         >
           Servicios
         </button>
+        <button
+          className={`shop-tab ${tab === 'products' ? 'active' : ''}`}
+          onClick={() => { setTab('products'); setActiveFilter(null); }}
+        >
+          Productos
+        </button>
       </div>
 
       {/* Category filters (products only) */}
+      {/* Search bar — products tab */}
+      {tab === 'products' && (
+        <div className="shop-search">
+          <input
+            type="text"
+            placeholder="Buscar productos..."
+            value={shopSearch}
+            onChange={(e) => setShopSearch(e.target.value)}
+          />
+        </div>
+      )}
+
       {tab === 'products' && subcategories.length > 0 && (
         <div className="shop-cat-filters">
           {subcategories.map((cat) => (
@@ -207,39 +249,127 @@ export default function Shop() {
               className={`shop-cat-btn ${activeFilter === cat ? 'active' : ''}`}
               onClick={() => setActiveFilter(activeFilter === cat ? null : cat)}
             >
-              {cat}
+              {cat} ({productItems.filter(p => p.subcategory === cat).length})
             </button>
           ))}
         </div>
       )}
 
-      {/* Product grid */}
+      {/* Content */}
       {loading ? (
         <div className="shop-loading" />
-      ) : displayItems.length === 0 ? (
-        <div className="shop-empty">No hay productos</div>
-      ) : (
+      ) : tab === 'services' ? (
+        /* Services — expandable cards */
         <div className="shop-section">
-          <div className="shop-grid">
-            {displayItems.map((p) => (
-              <div key={p.id} className="shop-card">
-                {p.image_url && (
-                  <div className="shop-card-img-wrap">
-                    <img src={p.image_url} alt={p.name} className="shop-card-img" />
+          {services.length === 0 ? (
+            <div className="shop-empty">No hay servicios</div>
+          ) : (
+            <div className="shop-services-list">
+              {services.map((s) => {
+                const isOpen = expandedService === s.id;
+                const allImages = [
+                  ...(s.image_url ? [{ url: s.image_url }] : []),
+                  ...(s.product_images || []).map(pi => ({ url: pi.image_url })),
+                ];
+                const idx = carouselIndex[s.id] || 0;
+                return (
+                  <div key={s.id} className={`shop-service-card ${isOpen ? 'open' : ''}`}>
+                    <button className="shop-service-header" onClick={() => setExpandedService(isOpen ? null : s.id)}>
+                      {s.image_url && <img src={s.image_url} alt="" className="shop-service-thumb" />}
+                      <div className="shop-service-info">
+                        <h3>{s.name}</h3>
+                        {Number(s.price) > 0 && <span className="shop-service-price">C${Number(s.price).toFixed(2)}</span>}
+                      </div>
+                      <span className={`shop-service-arrow ${isOpen ? 'open' : ''}`}>›</span>
+                    </button>
+
+                    {isOpen && (
+                      <div className="shop-service-body">
+                        {/* Image carousel */}
+                        {allImages.length > 0 && (
+                          <div className="shop-carousel"
+                            onTouchStart={(e) => { swipeStartX.current = e.touches[0].clientX; }}
+                            onTouchEnd={(e) => {
+                              const dx = e.changedTouches[0].clientX - swipeStartX.current;
+                              if (Math.abs(dx) < 50) return;
+                              if (dx < 0) setCarouselIndex(prev => ({ ...prev, [s.id]: (idx + 1) % allImages.length }));
+                              else setCarouselIndex(prev => ({ ...prev, [s.id]: (idx - 1 + allImages.length) % allImages.length }));
+                            }}
+                          >
+                            <img src={allImages[idx]?.url} alt="" className="shop-carousel-img" />
+                            {allImages.length > 1 && (
+                              <>
+                                <button className="shop-carousel-prev" onClick={() => setCarouselIndex(prev => ({ ...prev, [s.id]: (idx - 1 + allImages.length) % allImages.length }))}>‹</button>
+                                <button className="shop-carousel-next" onClick={() => setCarouselIndex(prev => ({ ...prev, [s.id]: (idx + 1) % allImages.length }))}>›</button>
+                                <div className="shop-carousel-dots">
+                                  {allImages.map((_, i) => (
+                                    <span key={i} className={`shop-carousel-dot ${i === idx ? 'active' : ''}`} />
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {s.description && <p className="shop-service-desc">{s.description}</p>}
+
+                        <div className="shop-service-actions">
+                        <button className="shop-service-order-btn" onClick={() => orderOnWhatsApp(s)}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                          Consultar
+                        </button>
+                        <button className="shop-service-share-btn" onClick={() => shareProduct(s)}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                        </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-                <div className="shop-card-body">
-                  <h3>{p.name}</h3>
-                  {p.subcategory && <span className="shop-card-cat">{p.subcategory}</span>}
-                  {Number(p.price) > 0 && <span className="shop-card-price">C${Number(p.price).toFixed(2)}</span>}
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        /* Products — grid */
+        <div className="shop-section">
+          {filteredProducts.length === 0 ? (
+            <div className="shop-empty">No hay productos</div>
+          ) : (
+            <div className="shop-grid">
+              {filteredProducts.map((p) => (
+                <div key={p.id} className="shop-card" onClick={() => setSelectedProduct(p)}>
+                  {p.image_url && (
+                    <div className="shop-card-img-wrap">
+                      <img src={p.image_url} alt={p.name} className="shop-card-img" />
+                    </div>
+                  )}
+                  <div className="shop-card-body">
+                    <h3>{p.name}</h3>
+                    {p.subcategory && <span className="shop-card-cat">{p.subcategory}</span>}
+                    {Number(p.price) > 0 && <span className="shop-card-price">C${Number(p.price).toFixed(2)}</span>}
+                  </div>
                 </div>
-                <button className="shop-order-btn" onClick={() => orderOnWhatsApp(p)}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                  Pedir
-                </button>
-              </div>
-            ))}
-          </div>
+              ))}
+
+              {/* Sold products */}
+              {filteredSold.map((p) => (
+                <div key={p.id} className="shop-card sold" onClick={() => setSelectedProduct({ ...p, _sold: true })}>
+                  {p.image_url && (
+                    <div className="shop-card-img-wrap">
+                      <img src={p.image_url} alt={p.name} className="shop-card-img" />
+                      <div className="shop-sold-overlay">Vendido</div>
+                    </div>
+                  )}
+                  <div className="shop-card-body">
+                    <h3>{p.name}</h3>
+                    {p.subcategory && <span className="shop-card-cat">{p.subcategory}</span>}
+                    {Number(p.price) > 0 && <span className="shop-card-price">C${Number(p.price).toFixed(2)}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -255,7 +385,7 @@ export default function Shop() {
           </div>
           <div className="shop-insta-grid">
             {gallery.slice(0, 9).map((g) => (
-              <div key={g.id} className="shop-insta-item">
+              <div key={g.id} className="shop-insta-item" onClick={() => { setZoomImages(gallery.slice(0, 9).map(x => x.image_url)); setZoomIndex(gallery.slice(0, 9).indexOf(g)); }}>
                 <img src={g.image_url} alt="" />
               </div>
             ))}
@@ -263,6 +393,72 @@ export default function Shop() {
           <a href="https://www.instagram.com/sarahsnails2308" target="_blank" rel="noopener noreferrer" className="shop-insta-follow">
             Ver más en Instagram
           </a>
+        </div>
+      )}
+
+      {/* Product detail modal */}
+      {selectedProduct && (
+        <div className="shop-product-overlay" onClick={() => setSelectedProduct(null)}>
+          <div className="shop-product-detail" onClick={(e) => e.stopPropagation()}>
+            <button className="shop-product-close" onClick={() => setSelectedProduct(null)}>✕</button>
+            <button className="shop-product-share" onClick={(e) => { e.stopPropagation(); shareProduct(selectedProduct); }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            </button>
+            {selectedProduct.image_url && (
+              <div className="shop-product-img-wrap" onClick={() => { setZoomImages([selectedProduct.image_url]); setZoomIndex(0); }}>
+                <img src={selectedProduct.image_url} alt={selectedProduct.name} className="shop-product-img" />
+                <span className="shop-product-zoom-hint">Toca para ampliar</span>
+              </div>
+            )}
+            <div className="shop-product-info">
+              <h2>{selectedProduct.name}</h2>
+              {selectedProduct.subcategory && <span className="shop-product-cat">{selectedProduct.subcategory}</span>}
+              {Number(selectedProduct.price) > 0 && <span className="shop-product-price">C${Number(selectedProduct.price).toFixed(2)}</span>}
+            </div>
+            {selectedProduct._sold ? (
+              <button className="shop-service-order-btn sold" onClick={() => {
+                const msg = encodeURIComponent(`Hola! Vi que "${selectedProduct.name}" ya se vendió. Tienen algo similar?`);
+                window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`, '_blank');
+                setSelectedProduct(null);
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                Preguntar por algo similar
+              </button>
+            ) : (
+            <button className="shop-service-order-btn" onClick={() => { orderOnWhatsApp(selectedProduct); setSelectedProduct(null); }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+              Pedir por WhatsApp
+            </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Zoom gallery overlay */}
+      {zoomImages && (
+        <div
+          className="shop-zoom-overlay"
+          onClick={() => setZoomImages(null)}
+          onTouchStart={(e) => { swipeStartX.current = e.touches[0].clientX; swipeStartY.current = e.touches[0].clientY; }}
+          onTouchEnd={(e) => {
+            const dx = e.changedTouches[0].clientX - swipeStartX.current;
+            const dy = Math.abs(e.changedTouches[0].clientY - swipeStartY.current);
+            if (dy > Math.abs(dx)) return; // vertical swipe, ignore
+            if (Math.abs(dx) < 50) return; // too small
+            e.stopPropagation();
+            if (dx < 0) setZoomIndex((zoomIndex + 1) % zoomImages.length);
+            else setZoomIndex((zoomIndex - 1 + zoomImages.length) % zoomImages.length);
+          }}
+        >
+          <img src={zoomImages[zoomIndex]} alt="" className="shop-zoom-img" onClick={(e) => e.stopPropagation()} />
+          {zoomImages.length > 1 && (
+            <>
+              <button className="shop-zoom-prev" onClick={(e) => { e.stopPropagation(); setZoomIndex((zoomIndex - 1 + zoomImages.length) % zoomImages.length); }}>‹</button>
+              <button className="shop-zoom-next" onClick={(e) => { e.stopPropagation(); setZoomIndex((zoomIndex + 1) % zoomImages.length); }}>›</button>
+              <div className="shop-zoom-counter">{zoomIndex + 1} / {zoomImages.length}</div>
+            </>
+          )}
+          <button className="shop-zoom-close" onClick={() => setZoomImages(null)}>✕</button>
         </div>
       )}
 
